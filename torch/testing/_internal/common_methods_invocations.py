@@ -968,7 +968,7 @@ def sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
     supports_multiple_dims: bool = kwargs.get('supports_multiple_dims', True)
 
     # TODO(@heitorschueroff) Once all reduction operators are using ReductionOpInfo
-    # use op_info.genearte_args_kwargs directly.
+    # use op_info.generate_args_kwargs directly.
     generate_args_kwargs = kwargs.get('generate_args_kwargs', lambda *args, **kwargs: (yield tuple(), {}))
 
     inputs: List[SampleInput] = []
@@ -1101,7 +1101,7 @@ class ReductionOpInfo(OpInfo):
     the optional keyword parameters of the ReductionOpInfo constructor.
 
     If a reduction operator does not yet implement the full required API of
-    reduction operators, this should be documented by skipping the failing
+    reduction operators, this should be documented by xfailing the failing
     tests rather than adding optional parameters to ReductionOpInfo.
 
     NOTE
@@ -2011,6 +2011,15 @@ def sample_inputs_isclose(
 
         yield SampleInput(lhs, args=(rhs,),
                           kwargs=dict(op_kwargs, rtol=rtol, atol=atol, equal_nan=equal_nan))
+
+def sample_inputs_linalg_vecdot(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_binary_pwise(op_info, device, dtype, requires_grad)
+
+    # Add also samples with dim != -1
+    for s in sample_inputs_binary_pwise(op_info, device, dtype, requires_grad):
+        if s.input.ndim > 1:
+            s.kwargs["dim"] = 0
+            yield s
 
 def sample_inputs_t(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -9778,6 +9787,16 @@ op_db: List[OpInfo] = [
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
            ),
+    OpInfo('linalg.vecdot',
+           aten_name='linalg_vecdot',
+           ref=lambda x, y, *, dim=-1: (x * y).sum(dim),
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
+           sample_inputs_func=sample_inputs_linalg_vecdot,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           skips=(
+               # FIXME torch.sum(out=) has an incorrect behaviour
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),),),
     OpInfo('linalg.cond',
            aten_name='linalg_cond',
            dtypes=floating_and_complex_types(),
